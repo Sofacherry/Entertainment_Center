@@ -1,0 +1,583 @@
+﻿<!-- Views/BookingPage.xaml -->
+<UserControl x:Class="Center.Views.BookingPageView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:local="clr-namespace:Center.Views"
+             mc:Ignorable="d" 
+             d:DesignHeight="1026.763" d:DesignWidth="800">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <!-- Русский шаблон отображения времени -->
+            <DataTemplate x:Key="RuTimeItemTemplate">
+                <TextBlock>
+                    <TextBlock.Text>
+                        <MultiBinding StringFormat="{}{0:HH:mm}">
+                            <Binding />
+                        </MultiBinding>
+                    </TextBlock.Text>
+                </TextBlock>
+            </DataTemplate>
+
+            <LinearGradientBrush x:Key="ServiceHeaderGradient" StartPoint="0,0" EndPoint="1,0">
+                <GradientStop Color="#2C4A6B" Offset="0"/>
+                <GradientStop Color="#4A6FA5" Offset="1"/>
+            </LinearGradientBrush>
+
+            <Style x:Key="SectionHeaderStyle" TargetType="Border">
+                <Setter Property="Background" Value="#FFFFFF"/>
+                <Setter Property="BorderBrush" Value="#E5E7EB"/>
+                <Setter Property="BorderThickness" Value="0,0,0,2"/>
+                <Setter Property="Padding" Value="20,15"/>
+            </Style>
+
+            <Style x:Key="InputLabelStyle" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="#374151"/>
+                <Setter Property="FontSize" Value="14"/>
+                <Setter Property="FontWeight" Value="Medium"/>
+                <Setter Property="Margin" Value="0,0,0,8"/>
+                <Setter Property="FontFamily" Value="Segoe UI"/>
+            </Style>
+
+            <Style x:Key="PrimaryButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="#2C4A6B"/>
+                <Setter Property="Foreground" Value="White"/>
+                <Setter Property="FontSize" Value="14"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="Padding" Value="16,10"/>
+                <Setter Property="BorderThickness" Value="0"/>
+                <Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="FontFamily" Value="Segoe UI"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{TemplateBinding Background}"
+                                    CornerRadius="8"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+                <Style.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter Property="Background" Value="#3D5A7A"/>
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+
+            <Style x:Key="SecondaryButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="Foreground" Value="#4A6FA5"/>
+                <Setter Property="FontSize" Value="14"/>
+                <Setter Property="FontWeight" Value="Medium"/>
+                <Setter Property="Padding" Value="16,10"/>
+                <Setter Property="BorderBrush" Value="#4A6FA5"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="FontFamily" Value="Segoe UI"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="8"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+                <Style.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter Property="Background" Value="#EFF6FF"/>
+                        <Setter Property="Foreground" Value="#3D5A7A"/>
+                        <Setter Property="BorderBrush" Value="#3D5A7A"/>
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+
+            <Style x:Key="ResourceCardStyle" TargetType="Border">
+                <Setter Property="Background" Value="#F9FAFB"/>
+                <Setter Property="BorderBrush" Value="#E5E7EB"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="CornerRadius" Value="8"/>
+                <Setter Property="Padding" Value="12"/>
+                <Setter Property="Margin" Value="0,0,8,8"/>
+                <Setter Property="Cursor" Value="Hand"/>
+            </Style>
+
+            <Style x:Key="SelectedResourceCardStyle" TargetType="Border" BasedOn="{StaticResource ResourceCardStyle}">
+                <Setter Property="Background" Value="#E0E7FF"/>
+                <Setter Property="BorderBrush" Value="#2C4A6B"/>
+                <Setter Property="BorderThickness" Value="2"/>
+            </Style>
+
+            <Style x:Key="InfoCardStyle" TargetType="Border">
+                <Setter Property="Background" Value="#F0F9FF"/>
+                <Setter Property="BorderBrush" Value="#E0F2FE"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="CornerRadius" Value="6"/>
+                <Setter Property="Padding" Value="10"/>
+            </Style>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <Grid Background="#F8F8F8">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- 1. Верхний блок с названием услуги и изображением -->
+            <Border Grid.Row="0" 
+                    Background="{StaticResource ServiceHeaderGradient}" 
+                    CornerRadius="0,0,20,20"
+                    Height="140"
+                    Margin="0,0,0,20">
+                <Grid>
+                    <!-- Фоновый узор -->
+                    <Canvas Opacity="0.1">
+                        <Ellipse Canvas.Left="50" Canvas.Top="20" Width="40" Height="40" Fill="White"/>
+                        <Ellipse Canvas.Left="650" Canvas.Top="60" Width="60" Height="60" Fill="White"/>
+                        <Rectangle Canvas.Left="300" Canvas.Top="30" Width="100" Height="20" Fill="White" RadiusX="10" RadiusY="10"/>
+                    </Canvas>
+
+                    <Grid Margin="30,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="120"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Название услуги и краткая информация -->
+                        <StackPanel Grid.Column="0" 
+                                    VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Service.Name}" 
+                                       FontSize="28" 
+                                       FontWeight="Bold"
+                                       Foreground="White"
+                                       FontFamily="Segoe UI"
+                                       TextWrapping="Wrap"/>
+
+                            <WrapPanel Margin="0,10,0,0">
+                                <!-- Категория -->
+                                <Border Background="White" 
+                                        CornerRadius="12" 
+                                        Padding="8,4" 
+                                        Margin="0,0,8,4"
+                                        Opacity="0.9">
+                                    <TextBlock Text="{Binding ServiceCategory}" 
+                                               FontSize="12" 
+                                               FontWeight="Medium"
+                                               Foreground="#2C4A6B"
+                                               FontFamily="Segoe UI"/>
+                                </Border>
+
+                                <!-- Продолжительность -->
+                                <Border Background="White" 
+                                        CornerRadius="12" 
+                                        Padding="8,4" 
+                                        Margin="0,0,8,4"
+                                        Opacity="0.9">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="⏱️" 
+                                                   FontSize="11" 
+                                                   Margin="0,0,4,0"/>
+                                        <TextBlock Text="{Binding Service.Duration, StringFormat='{}{0} мин'}" 
+                                                   FontSize="12" 
+                                                   FontWeight="Medium"
+                                                   Foreground="#2C4A6B"
+                                                   FontFamily="Segoe UI"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Цена -->
+                                <Border Background="White" 
+                                        CornerRadius="12" 
+                                        Padding="8,4" 
+                                        Margin="0,0,8,4"
+                                        Opacity="0.9">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="💰" 
+                                                   FontSize="11" 
+                                                   Margin="0,0,4,0"/>
+                                        <TextBlock Text="{Binding CurrentPrice, StringFormat='{}{0:N0} руб/час'}" 
+                                                   FontSize="12" 
+                                                   FontWeight="Medium"
+                                                   Foreground="#2C4A6B"
+                                                   FontFamily="Segoe UI"/>
+                                    </StackPanel>
+                                </Border>
+                            </WrapPanel>
+                        </StackPanel>
+
+                        <!-- Изображение услуги -->
+                        <Border Grid.Column="1" 
+        Background="White" 
+        CornerRadius="10"
+        Margin="0,0,0,0"
+        Width="100"
+        Height="100"
+        VerticalAlignment="Center">
+                            <Grid>
+                                <!-- Если есть изображение - показываем его -->
+                                <Image Source="{Binding ServiceImage}" 
+               Stretch="UniformToFill" 
+               Opacity="0.9"
+               Visibility="{Binding HasServiceImage, FallbackValue=Collapsed}"/>
+
+                                <!-- Заглушка если нет изображения -->
+                                <Viewbox Width="50" Height="50">
+                                    <TextBlock Text="{Binding ServiceIcon}" 
+                       FontSize="30" 
+                       Opacity="0.2"
+                       HorizontalAlignment="Center" 
+                       VerticalAlignment="Center">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <!-- Показываем заглушку только если нет изображения -->
+                                                    <DataTrigger Binding="{Binding HasServiceImage}" Value="True">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Viewbox>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <!-- 2. Основные данные для бронирования -->
+            <Border Grid.Row="1" 
+                    Style="{StaticResource SectionHeaderStyle}"
+                    CornerRadius="10"
+                    Margin="20,0,20,15">
+                <StackPanel>
+                    <TextBlock Text="📝 Данные для бронирования" 
+                               FontSize="16" 
+                               FontWeight="SemiBold"
+                               Foreground="#111827"
+                               FontFamily="Segoe UI"/>
+
+                    <Grid Margin="0,15,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Количество человек -->
+                        <StackPanel Grid.Column="0" Margin="0,0,15,0">
+                            <TextBlock Text="👥 Количество человек" 
+                                       Style="{StaticResource InputLabelStyle}"/>
+                            <TextBox Text="{Binding PeopleCount, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Height="40"
+                                     Padding="10"
+                                     FontSize="14"
+                                     Background="White"
+                                     BorderBrush="#D1D5DB"
+                                     BorderThickness="1"
+                                     FontFamily="Segoe UI"
+                                     PreviewTextInput="NumberValidationTextBox"/>
+                        </StackPanel>
+
+                        <!-- Дата -->
+                        <StackPanel Grid.Column="1" Margin="0,0,15,0">
+                            <TextBlock Text="📅 Дата" 
+                                       Style="{StaticResource InputLabelStyle}"/>
+                            <DatePicker SelectedDate="{Binding SelectedDate}"
+                                        Height="40"
+                                        Padding="10"
+                                        FontSize="14"
+                                        Background="White"
+                                        BorderBrush="#D1D5DB"
+                                        BorderThickness="1"
+                                        FontFamily="Segoe UI"/>
+                        </StackPanel>
+
+                        <!-- Время -->
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="🕒 Время" 
+                                       Style="{StaticResource InputLabelStyle}"/>
+                            <ComboBox SelectedItem="{Binding SelectedTimeSlot}"
+                                      ItemsSource="{Binding TimeSlots}"
+                                      Height="40"
+                                      Padding="10"
+                                      FontSize="14"
+                                      Background="White"
+                                      BorderBrush="#D1D5DB"
+                                      BorderThickness="1"
+                                      ItemTemplate="{StaticResource RuTimeItemTemplate}">
+                                <ComboBox.ItemContainerStyle>
+                                    <Style TargetType="ComboBoxItem">
+                                        <Setter Property="FontFamily" Value="Segoe UI"/>
+                                        <Setter Property="Padding" Value="5"/>
+                                    </Style>
+                                </ComboBox.ItemContainerStyle>
+                            </ComboBox>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- 3. Выбор ресурсов -->
+            <Border Grid.Row="2" 
+                    Style="{StaticResource SectionHeaderStyle}"
+                    CornerRadius="10"
+                    Margin="20,0,20,15">
+                <StackPanel>
+                    <TextBlock Text="🎯 Выбор ресурсов" 
+                               FontSize="16" 
+                               FontWeight="SemiBold"
+                               Foreground="#111827"
+                               FontFamily="Segoe UI"/>
+
+                    <TextBlock Text="{Binding ResourcesDescription}" 
+                               FontSize="14" 
+                               Foreground="#2C4A6B"
+                               FontWeight="Medium"
+                               Margin="0,5,0,15"
+                               FontFamily="Segoe UI"
+                               TextWrapping="Wrap"/>
+
+                    <!-- Список доступных ресурсов -->
+                    <ItemsControl ItemsSource="{Binding AvailableResources}"
+                                  Margin="0,0,0,10">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Width="110" 
+        Height="90">
+                                    <Border.InputBindings>
+                                        <MouseBinding MouseAction="LeftClick" 
+                      Command="{Binding DataContext.SelectResourceCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                      CommandParameter="{Binding}"/>
+                                    </Border.InputBindings>
+
+                                    <Border.Style>
+                                        <Style TargetType="Border" BasedOn="{StaticResource ResourceCardStyle}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                    <Setter Property="Background" Value="#10B981"/>
+                                                    <Setter Property="BorderBrush" Value="#059669"/>
+                                                    <Setter Property="BorderThickness" Value="2"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsDisabled}" Value="True">
+                                                    <Setter Property="Background" Value="#E5E7EB"/>
+                                                    <Setter Property="BorderBrush" Value="#9CA3AF"/>
+                                                    <Setter Property="Opacity" Value="0.5"/>
+                                                    <Setter Property="Cursor" Value="No"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+
+                                    <StackPanel HorizontalAlignment="Center" 
+                VerticalAlignment="Center">
+                                        <!-- Иконка ресурса -->
+                                        <Viewbox Width="24" Height="24">
+                                            <TextBlock Text="{Binding Icon}" 
+                       FontSize="18" 
+                       HorizontalAlignment="Center"/>
+                                        </Viewbox>
+                                        <TextBlock Text="{Binding Name}" 
+                   FontSize="13" 
+                   FontWeight="Medium"
+                   HorizontalAlignment="Center"
+                   Margin="0,6,0,2"
+                   FontFamily="Segoe UI"
+                   TextWrapping="Wrap"
+                   TextAlignment="Center"/>
+                                        <TextBlock Text="{Binding Capacity, StringFormat='{}{0} чел'}" 
+                   FontSize="11" 
+                   Foreground="#6B7280"
+                   HorizontalAlignment="Center"
+                   FontFamily="Segoe UI"/>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <!-- 4. Дополнительные услуги -->
+            <Border Grid.Row="3" 
+                    Style="{StaticResource SectionHeaderStyle}"
+                    CornerRadius="10"
+                    Margin="20,0,20,15">
+                <StackPanel>
+                    <TextBlock Text="✨ Дополнительно" 
+                               FontSize="16" 
+                               FontWeight="SemiBold"
+                               Foreground="#111827"
+                               FontFamily="Segoe UI"/>
+
+                    <StackPanel Margin="0,15,0,0">
+                        <CheckBox Content="🎓 Инструктор (+500 руб.)" 
+                                  IsChecked="{Binding IncludeInstructor}"
+                                  FontSize="14"
+                                  Margin="0,0,0,12"
+                                  FontFamily="Segoe UI">
+                            <CheckBox.Style>
+                                <Style TargetType="CheckBox">
+                                    <Setter Property="Foreground" Value="#374151"/>
+                                    <Setter Property="Cursor" Value="Hand"/>
+                                    <Setter Property="Padding" Value="0,5"/>
+                                </Style>
+                            </CheckBox.Style>
+                        </CheckBox>
+
+                        <CheckBox Content="🍕 Питание (+1000 руб.)" 
+                                  IsChecked="{Binding IncludeFood}"
+                                  FontSize="14"
+                                  FontFamily="Segoe UI">
+                            <CheckBox.Style>
+                                <Style TargetType="CheckBox">
+                                    <Setter Property="Foreground" Value="#374151"/>
+                                    <Setter Property="Cursor" Value="Hand"/>
+                                    <Setter Property="Padding" Value="0,5"/>
+                                </Style>
+                            </CheckBox.Style>
+                        </CheckBox>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- 5. Итог -->
+            <Border Grid.Row="4" 
+                    Background="White" 
+                    BorderBrush="#2C4A6B" 
+                    BorderThickness="2"
+                    CornerRadius="10"
+                    Margin="20,0,20,20"
+                    Padding="20">
+                <StackPanel>
+                    <TextBlock Text="💰 Итог к оплате" 
+                               FontSize="17" 
+                               FontWeight="Bold"
+                               Foreground="#111827"
+                               Margin="0,0,0,15"
+                               FontFamily="Segoe UI"/>
+
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Стоимость услуги -->
+                        <Grid Grid.Row="0" Margin="0,0,0,10">
+                            <TextBlock Text="Стоимость услуги" 
+                                       FontSize="14" 
+                                       Foreground="#4B5563"
+                                       FontFamily="Segoe UI"/>
+                            <TextBlock Text="{Binding ServicePrice, StringFormat='{}{0:N0} руб'}" 
+                                       FontSize="14" 
+                                       FontWeight="Medium"
+                                       Foreground="#111827"
+                                       HorizontalAlignment="Right"
+                                       FontFamily="Segoe UI"/>
+                        </Grid>
+
+                        <!-- Дополнительно -->
+                        <Grid Grid.Row="1" Margin="0,0,0,10">
+                            <TextBlock Text="Дополнительные услуги" 
+                                       FontSize="14" 
+                                       Foreground="#4B5563"
+                                       FontFamily="Segoe UI"/>
+                            <TextBlock Text="{Binding ExtrasPrice, StringFormat='{}{0:N0} руб'}" 
+                                       FontSize="14" 
+                                       FontWeight="Medium"
+                                       Foreground="#111827"
+                                       HorizontalAlignment="Right"
+                                       FontFamily="Segoe UI"/>
+                        </Grid>
+
+                        <!-- Скидка -->
+                        <Grid Grid.Row="2" Margin="0,0,0,15">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="🎁 Скидка" 
+                                           FontSize="14" 
+                                           Foreground="#4B5563"
+                                           FontFamily="Segoe UI"/>
+                                <TextBlock Text="{Binding UserDiscount, StringFormat=' ({0:P0})'}" 
+                                           FontSize="12" 
+                                           Foreground="#10B981"
+                                           Margin="5,0,0,0"
+                                           FontFamily="Segoe UI"/>
+                            </StackPanel>
+                            <TextBlock Text="{Binding DiscountAmount, StringFormat='-{0:N0} руб'}" 
+                                       FontSize="14" 
+                                       FontWeight="Medium"
+                                       Foreground="#10B981"
+                                       HorizontalAlignment="Right"
+                                       FontFamily="Segoe UI"/>
+                        </Grid>
+
+                        <!-- Разделитель -->
+                        <Border Grid.Row="3" 
+                                Height="1" 
+                                Background="#E5E7EB" 
+                                Margin="0,0,0,15"/>
+                    </Grid>
+
+                    <!-- Итого -->
+                    <Grid>
+                        <TextBlock Text="ИТОГО К ОПЛАТЕ" 
+                                   FontSize="16" 
+                                   FontWeight="Bold"
+                                   Foreground="#111827"
+                                   FontFamily="Segoe UI"/>
+                        <TextBlock Text="{Binding TotalPrice, StringFormat='{}{0:N0} руб'}" 
+                                   FontSize="24" 
+                                   FontWeight="Bold"
+                                   Foreground="#2C4A6B"
+                                   HorizontalAlignment="Right"
+                                   FontFamily="Segoe UI"/>
+                    </Grid>
+
+                    <!-- Кнопки действий -->
+                    <Grid Margin="0,20,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <Button Grid.Column="1" 
+                                Content="← Назад" 
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Margin="0,0,10,0"
+                                Command="{Binding GoBackCommand}"/>
+
+                        <Button Grid.Column="2" 
+                                Content="💳 Оплатить" 
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                FontSize="14"
+                                Padding="20,10"
+                                Command="{Binding ProceedToPaymentCommand}"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </ScrollViewer>
+</UserControl>

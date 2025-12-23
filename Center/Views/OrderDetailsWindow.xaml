@@ -1,0 +1,174 @@
+﻿<Window x:Class="Center.Views.OrderDetailsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:Center.Views"
+        xmlns:vm="clr-namespace:Center.ViewModels"
+        mc:Ignorable="d"
+        Title="Детали заказа"
+        Height="500"
+        Width="500"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        WindowStyle="ToolWindow">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+
+        <Style x:Key="DetailLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="Foreground" Value="#6B7280"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Margin" Value="0,0,0,4"/>
+        </Style>
+
+        <Style x:Key="DetailValueStyle" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#111827"/>
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="Margin" Value="0,0,0,12"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+
+        <Style x:Key="StatusBadgeStyle" TargetType="Border">
+            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="HorizontalAlignment" Value="Left"/>
+        </Style>
+
+        <Style x:Key="ButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="100"/>
+            <Setter Property="Height" Value="35"/>
+            <Setter Property="Margin" Value="5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Заголовок -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,20">
+            <TextBlock Text="🎫 Детали заказа" 
+                       FontSize="20" 
+                       FontWeight="Bold"
+                       Foreground="#2C4A6B"/>
+            <TextBlock Text="{Binding OrderId, StringFormat='Номер заказа: #{0}'}"
+                       FontSize="14"
+                       Foreground="#6B7280"/>
+        </StackPanel>
+
+        <!-- Детали заказа -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <!-- Информация об услуге -->
+                <StackPanel Margin="0,0,0,15">
+                    <TextBlock Text="Услуга" Style="{StaticResource DetailLabelStyle}"/>
+                    <TextBlock Text="{Binding ServiceName}" Style="{StaticResource DetailValueStyle}"/>
+
+                    <TextBlock Text="Дата и время" Style="{StaticResource DetailLabelStyle}"/>
+                    <TextBlock Text="{Binding FormattedOrderDate}" Style="{StaticResource DetailValueStyle}"/>
+
+                    <TextBlock Text="Количество человек" Style="{StaticResource DetailLabelStyle}"/>
+                    <TextBlock Text="{Binding PeopleCount, StringFormat='{}{0} чел.'}" Style="{StaticResource DetailValueStyle}"/>
+                </StackPanel>
+
+                <!-- Стоимость -->
+                <Border Background="#F0F9FF" CornerRadius="8" Padding="15" Margin="0,0,0,15">
+                    <StackPanel>
+                        <TextBlock Text="💵 Стоимость" 
+                                   FontWeight="Bold" 
+                                   Foreground="#0369A1"
+                                   Margin="0,0,0,8"/>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Итоговая сумма:" 
+                                           Foreground="#6B7280"/>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="{Binding FormattedTotalPrice}" 
+                                           FontWeight="Bold"
+                                           FontSize="16"
+                                           Foreground="#111827"/>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- Статус -->
+                <StackPanel Margin="0,0,0,15">
+                    <TextBlock Text="Статус заказа" Style="{StaticResource DetailLabelStyle}"/>
+                    <Border Background="{Binding StatusColor}" 
+                            Style="{StaticResource StatusBadgeStyle}">
+                        <TextBlock Text="{Binding Status}" 
+                                   Foreground="White"
+                                   FontWeight="Medium"/>
+                    </Border>
+                </StackPanel>
+
+                <!-- Ресурсы -->
+                <StackPanel Margin="0,0,0,15">
+                    <TextBlock Text="🏢 Выбранные ресурсы" 
+                               Style="{StaticResource DetailLabelStyle}"
+                               FontSize="15"/>
+
+                    <WrapPanel Margin="0,8,0,0">
+                        <TextBlock Text="{Binding ResourcesSummary}" 
+                                   Foreground="#374151"
+                                   FontSize="14"
+                                   TextWrapping="Wrap"/>
+                    </WrapPanel>
+                </StackPanel>
+
+                <!-- Дополнительная информация -->
+                <StackPanel Margin="0,0,0,15" 
+                            Visibility="{Binding ShowTimer, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <TextBlock Text="📝 Дополнительно" 
+                               Style="{StaticResource DetailLabelStyle}"
+                               FontSize="15"/>
+
+                    <Border Background="#FEF3C7" CornerRadius="8" Padding="12" Margin="0,8,0,0">
+                        <TextBlock Text="{Binding TimeUntilStart}" 
+                                   Foreground="#92400E"
+                                   FontSize="14"
+                                   TextWrapping="Wrap"/>
+                    </Border>
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Кнопки -->
+        <StackPanel Grid.Row="2" 
+                    Orientation="Horizontal" 
+                    HorizontalAlignment="Right"
+                    Margin="0,20,0,0">
+            <Button Content="Закрыть" 
+                    Style="{StaticResource ButtonStyle}"
+                    Background="Transparent"
+                    BorderBrush="#6B7280"
+                    BorderThickness="1"
+                    Foreground="#6B7280"
+                    Command="{Binding CloseCommand}"/>
+
+            <Button Content="Напомнить" 
+                    Style="{StaticResource ButtonStyle}"
+                    Background="#F59E0B"
+                    BorderBrush="#F59E0B"
+                    Foreground="White"
+                    Command="{Binding SetReminderCommand}"
+                    Visibility="{Binding CanSetReminder, Converter={StaticResource BoolToVisibilityConverter}}"/>
+        </StackPanel>
+    </Grid>
+</Window>
