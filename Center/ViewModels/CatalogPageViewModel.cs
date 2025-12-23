@@ -1,5 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
+using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
@@ -15,22 +14,33 @@ namespace Center.ViewModels
     public class CatalogPageViewModel : INotifyPropertyChanged
     {
         private readonly CatalogService _catalogService;
-        private ObservableCollection<ServiceModel> _allServices; // Все услуги
-        private ObservableCollection<ServiceModel> _displayedServices; // Отображаемые услуги
-        private ObservableCollection<CategoryModel> _allCategories;
-        private ObservableCollection<CategoryModel> _selectedCategories;
-        private string _searchText;
+        private ObservableCollection<ServiceModel> _services;
+        private ObservableCollection<ServiceModel> _displayedServices;
+        private ServiceModel _selectedService;
         private bool _isLoading;
-        private bool _hasSelectedCategories;
+        private string _searchText;
+        private ObservableCollection<CategoryModel> _allCategories;
+        private CategoryModel _selectedCategory;
 
         public event PropertyChangedEventHandler PropertyChanged;
+        public event Action<int> OnNavigateToBooking;
 
-        public ObservableCollection<ServiceModel> AllServices
+        public ObservableCollection<ServiceModel> Services
         {
-            get => _allServices;
+            get => _services;
             set
             {
-                _allServices = value;
+                _services = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public ServiceModel SelectedService
+        {
+            get => _selectedService;
+            set
+            {
+                _selectedService = value;
                 OnPropertyChanged();
             }
         }
@@ -45,14 +55,25 @@ namespace Center.ViewModels
             }
         }
 
-        private string _selectedCategoryText = "Сортировать по";
-        public string SelectedCategoryText
+        public bool IsLoading
         {
-            get => _selectedCategoryText;
+            get => _isLoading;
             set
             {
-                _selectedCategoryText = value;
+                _isLoading = value;
                 OnPropertyChanged();
+            }
+        }
+
+        public string SearchText
+        {
+            get => _searchText;
+            set
+            {
+                if (SetField(ref _searchText, value))
+                {
+                    FilterServices();
+                }
             }
         }
 
@@ -66,98 +87,31 @@ namespace Center.ViewModels
             }
         }
 
-        public ObservableCollection<CategoryModel> SelectedCategories
-        {
-            get => _selectedCategories;
-            set
-            {
-                _selectedCategories = value;
-                OnPropertyChanged();
-                HasSelectedCategories = value != null && value.Count > 0;
-                ApplyFilters();
-            }
-        }
-
-        public string SearchText
-        {
-            get => _searchText;
-            set
-            {
-                _searchText = value;
-                OnPropertyChanged();
-                ApplyFilters();
-            }
-        }
-
-        public bool IsLoading
-        {
-            get => _isLoading;
-            set
-            {
-                _isLoading = value;
-                OnPropertyChanged();
-            }
-        }
-
-        public bool HasSelectedCategories
-        {
-            get => _hasSelectedCategories;
-            set
-            {
-                _hasSelectedCategories = value;
-                OnPropertyChanged();
-            }
-        }
-
-        private CategoryModel _selectedCategory;
         public CategoryModel SelectedCategory
         {
             get => _selectedCategory;
             set
             {
-                _selectedCategory = value;
-                OnPropertyChanged();
-
-                if (value != null)
+                if (SetField(ref _selectedCategory, value))
                 {
-                    if (value.Id == -1)
-                    {
-                        SelectedCategories.Clear();
-                        DisplayAllServices();
-                    }
-                    else if (!SelectedCategories.Contains(value))
-                    {
-                        SelectedCategories.Add(value);
-                        ApplyFilters();
-                    }
-
+                    FilterServices();
                 }
             }
         }
 
-
-
-        // Команды
-        public ICommand SearchCommand { get; }
         public ICommand BookServiceCommand { get; }
-        public ICommand ClearFiltersCommand { get; }
-        public ICommand RemoveCategoryCommand { get; }
-        public ICommand AddCategoryCommand { get; }
+        public ICommand SearchCommand { get; }
 
         public CatalogPageViewModel(CatalogService catalogService)
         {
             _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
-
-            AllServices = new ObservableCollection<ServiceModel>();
+            Services = new ObservableCollection<ServiceModel>();
             DisplayedServices = new ObservableCollection<ServiceModel>();
             AllCategories = new ObservableCollection<CategoryModel>();
-            SelectedCategories = new ObservableCollection<CategoryModel>();
 
-            SearchCommand = new RelayCommand(SearchServices);
-            BookServiceCommand = new RelayCommand<ServiceModel>(BookService);
-            ClearFiltersCommand = new RelayCommand(ClearFilters);
-            RemoveCategoryCommand = new RelayCommand<CategoryModel>(RemoveCategory);
-            AddCategoryCommand = new RelayCommand<CategoryModel>(AddCategory);
+            // Используем стандартные команды без RelayCommand
+            BookServiceCommand = new Command<ServiceModel>(BookService, CanBookService);
+            SearchCommand = new Command(FilterServices);
 
             _ = LoadDataAsync();
         }
@@ -166,182 +120,201 @@ namespace Center.ViewModels
         {
             try
             {
-                IsLoading = true;
+                Application.Current.Dispatcher.Invoke(() => IsLoading = true);
 
-                var categories = await _catalogService.GetAllCategoriesAsync();
+                // Загружаем категории первыми
+                await LoadCategoriesAsync();
 
-                var services = await _catalogService.GetAllServicesAsync();
+                // Затем загружаем услуги
+                await LoadServicesAsync();
+            }
+            catch (Exception ex)
+            {
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    MessageBox.Show($"Ошибка загрузки данных: {ex.Message}",
+                                  "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                });
+            }
+            finally
+            {
+                Application.Current.Dispatcher.Invoke(() => IsLoading = false);
+            }
+        }
+
+        private async Task LoadServicesAsync()
+        {
+            try
+            {
+                // Используем GetFilteredServicesAsync который возвращает List<Services>
+                var services = await _catalogService.GetFilteredServicesAsync().ConfigureAwait(false);
 
                 Application.Current.Dispatcher.Invoke(() =>
                 {
-                    AllCategories.Clear();
-
-                    AllCategories.Add(new CategoryModel
-                    {
-                        Id = -1, 
-                        Name = "Все услуги"
-                    });
-
-                    foreach (var category in categories)
-                    {
-                        AllCategories.Add(new CategoryModel
-                        {
-                            Id = category.categoryid,
-                            Name = category.categoryname
-                        });
-                    }
-                    AllServices.Clear();
+                    Services.Clear();
+                    DisplayedServices.Clear();
                     foreach (var service in services)
                     {
-                        AllServices.Add(service);
+                        Services.Add(service);
                     }
-
-                    DisplayAllServices();
-
-                    SelectedCategory = AllCategories.FirstOrDefault();
+                    FilterServices();
                 });
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка загрузки данных: {ex.Message}",
-                              "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-            finally
-            {
-                IsLoading = false;
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    MessageBox.Show($"Ошибка загрузки услуг: {ex.Message}",
+                                  "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                });
             }
         }
-        private void DisplayAllServices()
+
+        private async Task LoadCategoriesAsync()
         {
+            try
+            {
+                var categories = await _catalogService.GetAllCategoriesAsync().ConfigureAwait(false);
+
+                // Обновляем коллекцию в UI потоке
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    AllCategories.Clear();
+                    // Добавляем элемент-подсказку "Сортировать по"
+                    AllCategories.Add(new CategoryModel { Id = -1, Name = "Сортировать по..." });
+                    // Добавляем пустую категорию "Все"
+                    AllCategories.Add(new CategoryModel { Id = 0, Name = "Все категории" });
+                    foreach (var category in categories)
+                    {
+                        AllCategories.Add(category);
+                    }
+                    // Устанавливаем элемент-подсказку как выбранный по умолчанию
+                    SelectedCategory = AllCategories.FirstOrDefault(c => c.Id == -1);
+                });
+            }
+            catch (Exception ex)
+            {
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    MessageBox.Show($"Ошибка загрузки категорий: {ex.Message}",
+                                  "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                });
+            }
+        }
+
+        private void FilterServices()
+        {
+            if (Services == null || Services.Count == 0)
+                return;
+
             DisplayedServices.Clear();
-            foreach (var service in AllServices)
+
+            var filtered = Services.AsEnumerable();
+
+            // Фильтр по категории (игнорируем элемент-подсказку с Id = -1)
+            if (SelectedCategory != null && SelectedCategory.Id > 0)
+            {
+                filtered = filtered.Where(s => s.Categories != null &&
+                    s.Categories.Any(c => c.Id == SelectedCategory.Id));
+            }
+
+            // Фильтр по поисковому запросу
+            if (!string.IsNullOrWhiteSpace(SearchText))
+            {
+                var searchLower = SearchText.ToLower();
+                filtered = filtered.Where(s => s.Name.ToLower().Contains(searchLower));
+            }
+
+            foreach (var service in filtered)
             {
                 DisplayedServices.Add(service);
             }
         }
 
-        private void ApplyFilters()
+        // Метод для бронирования услуги
+        public void BookService(ServiceModel service)
         {
-            if (AllServices == null) return;
-
-            var filtered = AllServices.AsEnumerable();
-
-            if (!string.IsNullOrWhiteSpace(SearchText))
+            if (service != null && service.Id > 0)
             {
-                var searchLower = SearchText.ToLower();
-                filtered = filtered.Where(s =>
-                    s.Name.ToLower().Contains(searchLower));
-            }
-
-            if (SelectedCategories != null && SelectedCategories.Count > 0)
-            {
-                var selectedCategoryIds = SelectedCategories.Select(c => c.Id).ToList();
-                filtered = filtered.Where(s =>
-                    s.Categories != null &&
-                    s.Categories.Any(c => selectedCategoryIds.Contains(c.Id)));
-            }
-
-            Application.Current.Dispatcher.Invoke(() =>
-            {
-                DisplayedServices.Clear();
-                foreach (var service in filtered)
-                {
-                    DisplayedServices.Add(service);
-                }
-            });
-        }
-
-        private void SearchServices()
-        {
-            ApplyFilters();
-        }
-
-        private void BookService(ServiceModel service)
-        {
-            if (service != null)
-            {
-                MessageBox.Show($"Бронирование услуги: {service.Name}\nЦена: {service.WeekdayPrice:N0} ₽ (будни)",
-                              "Бронирование", MessageBoxButton.OK, MessageBoxImage.Information);
+                OnNavigateToBooking?.Invoke(service.Id);
             }
         }
 
-        private void ClearFilters()
+        private bool CanBookService(ServiceModel service)
         {
-            SearchText = string.Empty;
-            SelectedCategories.Clear();
-            DisplayAllServices(); 
-        }
-
-        private void RemoveCategory(CategoryModel category)
-        {
-            if (category != null && SelectedCategories.Contains(category))
-            {
-                SelectedCategories.Remove(category);
-                ApplyFilters(); 
-            }
-        }
-
-        private void AddCategory(CategoryModel category)
-        {
-            if (category != null && !SelectedCategories.Contains(category))
-            {
-                SelectedCategories.Add(category);
-                ApplyFilters(); 
-            }
-        }
-
-        public void AddSelectedCategory(CategoryModel category)
-        {
-            AddCategory(category);
+            return service != null && service.Id > 0;
         }
 
         protected void OnPropertyChanged([CallerMemberName] string propertyName = null)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }
-    }
 
-    public class RelayCommand : ICommand
-    {
-        private readonly Action _execute;
-        private readonly Func<bool> _canExecute;
-
-        public event EventHandler CanExecuteChanged
+        protected bool SetField<T>(ref T field, T value, [CallerMemberName] string propertyName = null)
         {
-            add { CommandManager.RequerySuggested += value; }
-            remove { CommandManager.RequerySuggested -= value; }
+            if (System.Collections.Generic.EqualityComparer<T>.Default.Equals(field, value)) return false;
+            field = value;
+            OnPropertyChanged(propertyName);
+            return true;
         }
 
-        public RelayCommand(Action execute, Func<bool> canExecute = null)
+        // Простой класс Command для замены RelayCommand
+        private class Command : ICommand
         {
-            _execute = execute;
-            _canExecute = canExecute;
+            private readonly Action _execute;
+            private readonly Func<bool> _canExecute;
+
+            public Command(Action execute, Func<bool> canExecute = null)
+            {
+                _execute = execute ?? throw new ArgumentNullException(nameof(execute));
+                _canExecute = canExecute;
+            }
+
+            public bool CanExecute(object parameter) => _canExecute?.Invoke() ?? true;
+            public void Execute(object parameter) => _execute();
+            public event EventHandler CanExecuteChanged
+            {
+                add => CommandManager.RequerySuggested += value;
+                remove => CommandManager.RequerySuggested -= value;
+            }
         }
 
-        public bool CanExecute(object parameter) => _canExecute == null || _canExecute();
-
-        public void Execute(object parameter) => _execute();
-    }
-
-    public class RelayCommand<T> : ICommand
-    {
-        private readonly Action<T> _execute;
-        private readonly Func<T, bool> _canExecute;
-
-        public event EventHandler CanExecuteChanged
+        // Простой класс Command<T> для типизированных команд
+        private class Command<T> : ICommand
         {
-            add { CommandManager.RequerySuggested += value; }
-            remove { CommandManager.RequerySuggested -= value; }
+            private readonly Action<T> _execute;
+            private readonly Func<T, bool> _canExecute;
+
+            public Command(Action<T> execute, Func<T, bool> canExecute = null)
+            {
+                _execute = execute ?? throw new ArgumentNullException(nameof(execute));
+                _canExecute = canExecute;
+            }
+
+            public bool CanExecute(object parameter)
+            {
+                if (parameter == null && typeof(T).IsValueType)
+                    return false;
+                return _canExecute?.Invoke((T)parameter) ?? true;
+            }
+
+            public void Execute(object parameter)
+            {
+                if (parameter is T typedParameter)
+                {
+                    _execute(typedParameter);
+                }
+                else if (parameter == null && !typeof(T).IsValueType)
+                {
+                    _execute(default);
+                }
+            }
+
+            public event EventHandler CanExecuteChanged
+            {
+                add => CommandManager.RequerySuggested += value;
+                remove => CommandManager.RequerySuggested -= value;
+            }
         }
-
-        public RelayCommand(Action<T> execute, Func<T, bool> canExecute = null)
-        {
-            _execute = execute;
-            _canExecute = canExecute;
-        }
-
-        public bool CanExecute(object parameter) => _canExecute == null || _canExecute((T)parameter);
-
-        public void Execute(object parameter) => _execute((T)parameter);
     }
 }
