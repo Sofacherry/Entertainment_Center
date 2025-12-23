@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using DAL;
 using DAL.Entities;
 using System.Resources;
@@ -17,9 +17,9 @@ namespace BLL
 
         // Services
 
-        public async Task<Services> CreateServiceAsync(ServiceData data)
+        public async Task<DAL.Entities.Services> CreateServiceAsync(ServiceData data)
         {
-            var service = new Services
+            var service = new DAL.Entities.Services
             {
                 name = data.Name,
                 duration = data.Duration,
