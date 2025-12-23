@@ -1,14 +1,31 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
+
+// Пояснение по "популярным услугам":
+// Если не считает правильно популярные услуги, вероятно, ошибка в том,
+// что учитываются не все заказы (например, включены отменённые или не оплаченные).
+// Проверьте, чтобы при подсчёте популярных услуг фильтровались только завершённые/оплаченные заказы!
+// Например, используйте только те заказы, где o.status != "отменен". 
+// Также убедитесь, что группировка и подсчёт выполняются по id или названию услуги корректно.
+
+// Пример запроса:
+// var servicePopularity = await _context.orderItems
+//      .Where(oi => oi.order.status != "отменен")
+//      .GroupBy(oi => oi.serviceId)
+//      .Select(g => new { ServiceId = g.Key, Count = g.Count() })
+//      .OrderByDescending(x => x.Count)
+//      .ToListAsync();
+
 using DAL.Entities;
 using System.Text;
 using iTextSharp.text;
 using iTextSharp.text.pdf;
 using System.IO;
 using DAL;
-using Npgsql.Internal;
-using static System.Net.Mime.MediaTypeNames;
-using System.Reflection.Metadata;
-using System.Xml.Linq;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using BLL.Models;
 
 namespace BLL
 {
@@ -21,44 +38,271 @@ namespace BLL
             _context = context;
         }
 
-        // 1. Популярные услуги (по количеству заказов)
-        public async Task<List<PopularServiceReport>> GetPopularServicesAsync(
-            DateTime? startDate = null, DateTime? endDate = null, int topCount = 10)
+        // Получить все завершенные заказы (все кроме отмененных)
+        private IQueryable<Orders> GetCompletedOrdersQuery()
         {
-            var query = _context.orders
-                .Where(o => o.status != "отменен")
-                .AsQueryable();
-
-            if (startDate.HasValue)
-                query = query.Where(o => o.orderdate >= startDate.Value);
-
-            if (endDate.HasValue)
-                query = query.Where(o => o.orderdate <= endDate.Value);
-
-            return await query
-                .GroupBy(o => o.serviceid)
-                .Select(g => new PopularServiceReport
-                {
-                    ServiceId = g.Key,
-                    ServiceName = g.First().service.name,
-                    OrderCount = g.Count(),
-                    TotalRevenue = g.Sum(o => o.totalprice),
-                    AveragePeople = g.Average(o => o.peoplecount),
-                    PopularityRank = 0 
-                })
-                .OrderByDescending(r => r.OrderCount)
-                .Take(topCount)
-                .ToListAsync();
+            return _context.orders
+                .Include(o => o.service)
+                .Include(o => o.user)
+                .Where(o => o.status != "отменен");
         }
 
-        // 2. Дорогие услуги (по цене)
+        // Получить оплаченные заказы (включаем статус "создан" для демонстрации)
+        private IQueryable<Orders> GetPaidOrdersQuery()
+        {
+            // Для демонстрации считаем ВСЕ заказы, кроме отмененных
+            return _context.orders
+                .Where(o => o.status != "отменен");
+            // Если нужны только оплаченные, то так:
+            // .Where(o => o.status == "оплачен" || o.status == "подтвержден");
+        }
+
+        // 1. Дашборд - все метрики из БД
+        public async Task<DashboardMetrics> GetDashboardMetricsAsync()
+        {
+            var metrics = new DashboardMetrics();
+            var today = DateTime.Today;
+
+            try
+            {
+                // Загружаем все заказы с включением связанных данных
+                var allOrders = await _context.orders
+                    .Include(o => o.service)
+                    .Include(o => o.user)
+                    .ToListAsync();
+                
+                // ДЛЯ ДЕМОНСТРАЦИИ: считаем ВСЕ заказы кроме отмененных как оплаченные
+                var paidOrders = allOrders.Where(o => o.status != "отменен").ToList();
+
+                Console.WriteLine($"Всего заказов в БД: {allOrders.Count}");
+                Console.WriteLine($"Заказов для выручки (не отмененные): {paidOrders.Count}");
+
+                // Выводим детальную информацию о заказах
+                foreach (var order in allOrders)
+                {
+                    Console.WriteLine($"Заказ #{order.orderid}: Статус='{order.status}', Цена={order.totalprice}, Дата={order.orderdate}");
+                }
+
+                // Общая выручка (все кроме отмененных)
+                metrics.TotalRevenue = paidOrders.Sum(o => o.totalprice);
+                Console.WriteLine($"Общая выручка: {metrics.TotalRevenue}");
+
+                // Всего заказов
+                metrics.TotalOrders = allOrders.Count;
+
+                // Заказы сегодня (сравниваем даты без учета времени)
+                var todayOrders = allOrders.Where(o => o.orderdate.Date == today.Date).ToList();
+                metrics.TodayOrders = todayOrders.Count;
+
+                // Выручка сегодня (все кроме отмененных)
+                var completedTodayOrders = todayOrders.Where(o => o.status != "отменен").ToList();
+                metrics.TodayRevenue = completedTodayOrders.Sum(o => o.totalprice);
+                Console.WriteLine($"Выручка сегодня: {metrics.TodayRevenue}");
+
+                // Активные пользователи (с заказами за последние 30 дней)
+                var last30Days = DateTime.UtcNow.AddDays(-30);
+                metrics.ActiveUsers = allOrders
+                    .Where(o => o.orderdate >= last30Days)
+                    .Select(o => o.userid)
+                    .Distinct()
+                    .Count();
+
+                // Посещения за месяц (все заказы кроме отмененных)
+                var firstDayOfMonth = new DateTime(today.Year, today.Month, 1);
+                metrics.VisitStatistics = allOrders
+                    .Count(o => o.orderdate >= firstDayOfMonth && o.status != "отменен");
+
+                // Самая популярная услуга (по количеству заказов - все кроме отмененных)
+                var completedOrders = allOrders.Where(o => o.status != "отменен").ToList();
+                var popularServiceData = completedOrders
+                    .GroupBy(o => o.serviceid)
+                    .Select(g => new
+                    {
+                        ServiceId = g.Key,
+                        ServiceName = g.First().service?.name ?? "Неизвестно",
+                        OrderCount = g.Count(),
+                        // ДЛЯ ДЕМОНСТРАЦИИ: считаем выручку для всех заказов в группе
+                        TotalRevenue = g.Sum(o => o.totalprice)
+                    })
+                    .OrderByDescending(x => x.OrderCount)
+                    .FirstOrDefault();
+
+                if (popularServiceData != null)
+                {
+                    metrics.MostPopularService = popularServiceData.ServiceName;
+                    metrics.MostPopularServiceCount = popularServiceData.OrderCount;
+                    metrics.MostPopularServiceRevenue = popularServiceData.TotalRevenue;
+                    Console.WriteLine($"Популярная услуга: {popularServiceData.ServiceName}, Выручка: {popularServiceData.TotalRevenue}");
+                }
+
+                // Самый популярный месяц для развлечений (все заказы кроме отмененных)
+                var popularMonthData = completedOrders
+                    .GroupBy(o => new { o.orderdate.Year, o.orderdate.Month })
+                    .Select(g => new
+                    {
+                        Year = g.Key.Year,
+                        Month = g.Key.Month,
+                        OrderCount = g.Count(),
+                        MonthName = new DateTime(g.Key.Year, g.Key.Month, 1).ToString("MMMM yyyy")
+                    })
+                    .OrderByDescending(x => x.OrderCount)
+                    .FirstOrDefault();
+
+                if (popularMonthData != null)
+                {
+                    metrics.MostPopularMonth = popularMonthData.MonthName;
+                    metrics.MostPopularMonthOrders = popularMonthData.OrderCount;
+                }
+
+                // График выручки по дням (последние 7 дней, все кроме отмененных)
+                var last7Days = DateTime.Today.AddDays(-6);
+                var revenueByDayData = completedOrders
+                    .Where(o => o.orderdate >= last7Days)
+                    .GroupBy(o => o.orderdate.Date)
+                    .Select(g => new
+                    {
+                        Date = g.Key,
+                        Revenue = g.Sum(o => o.totalprice)
+                    })
+                    .ToList();
+
+                // Заполняем все дни
+                for (int i = 0; i < 7; i++)
+                {
+                    var date = today.AddDays(-i);
+                    var revenueData = revenueByDayData.FirstOrDefault(r => r.Date.Date == date);
+                    metrics.Last7DaysRevenue[date] = revenueData?.Revenue ?? 0m;
+                }
+
+                // Логируем данные для графика
+                Console.WriteLine("Данные для графика:");
+                foreach (var item in metrics.Last7DaysRevenue)
+                {
+                    Console.WriteLine($"{item.Key:dd.MM.yyyy}: {item.Value} ₽");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error loading dashboard metrics: {ex.Message}");
+                Console.WriteLine($"StackTrace: {ex.StackTrace}");
+            }
+
+            return metrics;
+        }
+
+        // 2. Популярные услуги (топ-5) - все кроме отмененных
+        public async Task<List<PopularServiceReport>> GetPopularServicesAsync(
+            DateTime? startDate = null, DateTime? endDate = null, int topCount = 5)
+        {
+            try
+            {
+                // Загружаем все данные с включением
+                var allOrders = await _context.orders
+                    .Include(o => o.service)
+                    .ToListAsync();
+
+                Console.WriteLine($"=== GetPopularServicesAsync ===");
+                Console.WriteLine($"Всего заказов: {allOrders.Count}");
+                Console.WriteLine($"Статусы заказов: {string.Join(", ", allOrders.Select(o => $"{o.orderid}:{o.status}"))}");
+
+                // Фильтруем заказы
+                var filteredOrders = allOrders
+                    .Where(o => o.status != "отменен")
+                    .ToList();
+
+                if (startDate.HasValue)
+                {
+                    var startDateUtc = startDate.Value.Kind == DateTimeKind.Local ?
+                        startDate.Value.ToUniversalTime() : startDate.Value;
+                    filteredOrders = filteredOrders.Where(o => o.orderdate >= startDateUtc).ToList();
+                }
+
+                if (endDate.HasValue)
+                {
+                    var endDateUtc = endDate.Value.Kind == DateTimeKind.Local ?
+                        endDate.Value.ToUniversalTime() : endDate.Value;
+                    filteredOrders = filteredOrders.Where(o => o.orderdate <= endDateUtc).ToList();
+                }
+
+                Console.WriteLine($"Заказов после фильтрации: {filteredOrders.Count}");
+
+                // Группируем услуги
+                var groupedResults = filteredOrders
+                    .GroupBy(o => new
+                    {
+                        o.serviceid,
+                        ServiceName = o.service?.name ?? "Неизвестно"
+                    })
+                    .Select(g => new
+                    {
+                        ServiceId = g.Key.serviceid,
+                        ServiceName = g.Key.ServiceName,
+                        OrderCount = g.Count(),
+                        // ДЛЯ ДЕМОНСТРАЦИИ: считаем выручку для всех заказов
+                        TotalRevenue = g.Sum(o => o.totalprice),
+                        AveragePeople = g.Average(o => (double?)o.peoplecount)
+                    })
+                    .Where(r => r.OrderCount > 0)
+                    .OrderByDescending(r => r.OrderCount)
+                    .Take(topCount)
+                    .ToList();
+
+                Console.WriteLine($"Найдено услуг: {groupedResults.Count}");
+                foreach (var r in groupedResults)
+                {
+                    Console.WriteLine($"Услуга: {r.ServiceName}, Заказов: {r.OrderCount}, Выручка: {r.TotalRevenue}");
+                }
+
+                var rank = 1;
+                var result = groupedResults.Select(r => new PopularServiceReport
+                {
+                    ServiceId = r.ServiceId,
+                    ServiceName = r.ServiceName,
+                    OrderCount = r.OrderCount,
+                    TotalRevenue = r.TotalRevenue,
+                    AveragePeople = r.AveragePeople ?? 0.0,
+                    PopularityRank = rank++
+                }).ToList();
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error loading popular services: {ex.Message}");
+                Console.WriteLine($"StackTrace: {ex.StackTrace}");
+                return new List<PopularServiceReport>();
+            }
+        }
+
+        // 3. Дорогие услуги (фильтр по цене)
         public async Task<List<ExpensiveServiceReport>> GetExpensiveServicesAsync(
             decimal? minPrice = null, int topCount = 10)
         {
-            var minPriceValue = minPrice ?? await GetAverageServicePriceAsync() * 1.5m;
+            try
+            {
+                var query = _context.services.AsQueryable();
 
-            return await _context.services
-                .Select(s => new ExpensiveServiceReport
+                if (minPrice.HasValue && minPrice > 0)
+                {
+                    query = query.Where(s => s.weekdayprice >= minPrice.Value || s.weekendprice >= minPrice.Value);
+                }
+
+                var results = await query
+                    .Select(s => new
+                    {
+                        s.serviceid,
+                        s.name,
+                        s.duration,
+                        s.weekdayprice,
+                        s.weekendprice
+                    })
+                    .OrderByDescending(s => Math.Max(s.weekdayprice, s.weekendprice))
+                    .Take(topCount)
+                    .ToListAsync();
+
+                Console.WriteLine($"Найдено дорогих услуг: {results.Count}");
+
+                return results.Select(s => new ExpensiveServiceReport
                 {
                     ServiceId = s.serviceid,
                     ServiceName = s.name,
@@ -67,68 +311,98 @@ namespace BLL
                     WeekendPrice = s.weekendprice,
                     AveragePrice = (s.weekdayprice + s.weekendprice) / 2,
                     PriceCategory = GetPriceCategory(s.weekdayprice, s.weekendprice)
-                })
-                .Where(r => r.AveragePrice >= minPriceValue)
-                .OrderByDescending(r => r.AveragePrice)
-                .Take(topCount)
-                .ToListAsync();
-        }
-
-        // 3. Средняя цена услуг (вспомогательный метод)
-        private async Task<decimal> GetAverageServicePriceAsync()
-        {
-            var prices = await _context.services
-                .Select(s => (s.weekdayprice + s.weekendprice) / 2)
-                .ToListAsync();
-
-            return prices.Any() ? prices.Average() : 0;
-        }
-
-        // 4. Отчет о выручке за период
-        public async Task<RevenueReport> GetRevenueReportAsync(
-            DateTime startDate, DateTime endDate)
-        {
-            var orders = await _context.orders
-                .Where(o => o.orderdate >= startDate && o.orderdate <= endDate)
-                .Include(o => o.service)
-                .Include(o => o.user)
-                .ToListAsync();
-
-            var completedOrders = orders.Where(o => o.status != "отменен").ToList();
-
-            return new RevenueReport
+                }).ToList();
+            }
+            catch (Exception ex)
             {
-                PeriodStart = startDate,
-                PeriodEnd = endDate,
-                TotalOrders = orders.Count,
-                CompletedOrders = completedOrders.Count,
-                CancelledOrders = orders.Count - completedOrders.Count,
-                TotalRevenue = completedOrders.Sum(o => o.totalprice),
-                AverageOrderValue = completedOrders.Any() ?
-                    completedOrders.Average(o => o.totalprice) : 0,
+                Console.WriteLine($"Error loading expensive services: {ex.Message}");
+                return new List<ExpensiveServiceReport>();
+            }
+        }
 
-                RevenueByService = completedOrders
-                    .GroupBy(o => o.service.name)
-                    .ToDictionary(g => g.Key, g => g.Sum(o => o.totalprice)),
+        // 4. Отчет о выручке за период (только оплаченные заказы) - ИСПРАВЛЕННЫЙ
+        // 4. Отчет о выручке за период (все кроме отмененных) - ИСПРАВЛЕННЫЙ
+        public async Task<RevenueReport> GetRevenueReportAsync(DateTime startDate, DateTime endDate)
+        {
+            try
+            {
+                Console.WriteLine($"=== GetRevenueReportAsync ===");
+                Console.WriteLine($"Период: {startDate:dd.MM.yyyy} - {endDate:dd.MM.yyyy}");
 
-                RevenueByDay = completedOrders
-                    .GroupBy(o => o.orderdate.Date)
-                    .OrderBy(g => g.Key)
-                    .ToDictionary(g => g.Key, g => g.Sum(o => o.totalprice)),
+                // Загружаем все заказы
+                var allOrders = await _context.orders
+                    .Include(o => o.service)
+                    .Include(o => o.user)
+                    .ToListAsync();
 
-                TopServices = completedOrders
-                    .GroupBy(o => o.service.name)
+                Console.WriteLine($"Всего заказов в БД: {allOrders.Count}");
+
+                // Фильтруем по дате
+                allOrders = allOrders
+                    .Where(o => o.orderdate >= startDate && o.orderdate <= endDate)
+                    .ToList();
+
+                Console.WriteLine($"Заказов в периоде: {allOrders.Count}");
+
+                // Показываем все заказы с деталями
+                foreach (var order in allOrders)
+                {
+                    Console.WriteLine($"Заказ #{order.orderid}: Услуга={order.service?.name}, Цена={order.totalprice}, Статус={order.status}");
+                }
+
+                // Для выручки считаем ВСЕ заказы кроме отмененных
+                var paidOrders = allOrders
+                    .Where(o => o.status != "отменен")
+                    .ToList();
+
+                Console.WriteLine($"Заказов для выручки (не отмененные): {paidOrders.Count}");
+
+                // Отмененные заказы
+                var cancelledOrders = allOrders.Where(o => o.status == "отменен").ToList();
+                Console.WriteLine($"Отмененных заказов: {cancelledOrders.Count}");
+
+                // Подсчитываем выручку
+                var totalRevenue = paidOrders.Sum(o => o.totalprice);
+                var averageOrderValue = paidOrders.Any() ? paidOrders.Average(o => o.totalprice) : 0m;
+
+                Console.WriteLine($"Общая выручка: {totalRevenue}");
+                Console.WriteLine($"Средний чек: {averageOrderValue}");
+
+                // Выручка по дням
+                var revenueByDay = new Dictionary<DateTime, decimal>();
+                var currentDate = startDate.Date;
+                while (currentDate <= endDate.Date)
+                {
+                    var dayRevenue = paidOrders
+                        .Where(o => o.orderdate.Date == currentDate)
+                        .Sum(o => o.totalprice);
+                    revenueByDay[currentDate] = dayRevenue;
+                    Console.WriteLine($"{currentDate:dd.MM.yyyy}: {dayRevenue} ₽");
+                    currentDate = currentDate.AddDays(1);
+                }
+
+                // Топ услуг по выручке
+                var topServices = paidOrders
+                    .GroupBy(o => o.service?.name ?? "Неизвестно")
                     .Select(g => new ServiceRevenue
                     {
                         ServiceName = g.Key,
                         Revenue = g.Sum(o => o.totalprice),
                         OrderCount = g.Count()
                     })
+                    .Where(s => s.Revenue > 0)
                     .OrderByDescending(s => s.Revenue)
                     .Take(5)
-                    .ToList(),
+                    .ToList();
 
-                CustomerStatistics = completedOrders
+                Console.WriteLine($"Найдено услуг в топе: {topServices.Count}");
+                foreach (var service in topServices)
+                {
+                    Console.WriteLine($"Услуга: {service.ServiceName}, Выручка: {service.Revenue}, Заказов: {service.OrderCount}");
+                }
+
+                // Статистика по клиентам
+                var customerStats = paidOrders
                     .GroupBy(o => o.userid)
                     .Select(g => new CustomerStats
                     {
@@ -137,264 +411,246 @@ namespace BLL
                         OrderCount = g.Count(),
                         TotalSpent = g.Sum(o => o.totalprice)
                     })
+                    .Where(c => c.TotalSpent > 0)
                     .OrderByDescending(c => c.TotalSpent)
                     .Take(10)
-                    .ToList()
-            };
-        }
+                    .ToList();
 
-        // 5. Ежедневный отчет
-        public async Task<DailyReport> GetDailyReportAsync(DateTime date)
-        {
-            var orders = await _context.orders
-                .Where(o => o.orderdate.Date == date.Date)
-                .Include(o => o.service)
-                .Include(o => o.user)
-                .ToListAsync();
-
-            var resources = await _context.orderresources
-                .Where(or => or.order.orderdate.Date == date.Date)
-                .Include(or => or.resource)
-                .Include(or => or.order)
-                .ToListAsync();
-
-            return new DailyReport
-            {
-                ReportDate = date,
-                TotalOrders = orders.Count,
-                CompletedOrders = orders.Count(o => o.status != "отменен"),
-
-                OrdersByStatus = orders
-                    .GroupBy(o => o.status)
-                    .ToDictionary(g => g.Key, g => g.Count()),
-
-                OrdersByHour = orders
-                    .Where(o => o.status != "отменен")
-                    .GroupBy(o => o.orderdate.Hour)
-                    .OrderBy(g => g.Key)
-                    .ToDictionary(g => g.Key, g => g.Count()),
-
-                ResourceUtilization = resources
-                    .Where(or => or.order.status != "отменен")
-                    .GroupBy(or => or.resource.name)
-                    .ToDictionary(g => g.Key, g => g.Count()),
-
-                BusiestHour = orders
-                    .Where(o => o.status != "отменен")
-                    .GroupBy(o => o.orderdate.Hour)
-                    .OrderByDescending(g => g.Count())
-                    .Select(g => g.Key)
-                    .FirstOrDefault()
-            };
-        }
-
-        // 6. Статистика по ресурсам
-        public async Task<ResourceReport> GetResourceReportAsync(
-            DateTime startDate, DateTime endDate)
-        {
-            var resourceUsage = await _context.orderresources
-                .Where(or => or.order.orderdate >= startDate &&
-                           or.order.orderdate <= endDate &&
-                           or.order.status != "отменен")
-                .Include(or => or.resource)
-                .Include(or => or.order)
-                .GroupBy(or => or.resource)
-                .Select(g => new ResourceUsage
+                return new RevenueReport
                 {
-                    ResourceId = g.Key.resourceid,
-                    ResourceName = g.Key.name,
-                    Capacity = g.Key.capacity,
-                    UsageCount = g.Count(),
-                    TotalHours = g.Sum(or => or.order.service.duration) / 60.0m,
-                    UtilizationRate = 0 
-                })
-                .ToListAsync();
-
-            // Рассчитываем коэффициент использования
-            var totalDays = (endDate - startDate).Days + 1;
-            var maxPossibleUsage = totalDays * 8; 
-
-            foreach (var usage in resourceUsage)
-            {
-                usage.UtilizationRate = maxPossibleUsage > 0 ?
-                    usage.TotalHours / maxPossibleUsage : 0;
+                    PeriodStart = startDate,
+                    PeriodEnd = endDate,
+                    TotalOrders = allOrders.Count,
+                    CompletedOrders = paidOrders.Count,
+                    CancelledOrders = cancelledOrders.Count,
+                    TotalRevenue = totalRevenue,
+                    AverageOrderValue = averageOrderValue,
+                    RevenueByDay = revenueByDay,
+                    TopServices = topServices,
+                    CustomerStatistics = customerStats
+                };
             }
-
-            return new ResourceReport
+            catch (Exception ex)
             {
-                PeriodStart = startDate,
-                PeriodEnd = endDate,
-                ResourceUsages = resourceUsage.OrderByDescending(r => r.UtilizationRate).ToList(),
-                MostUsedResource = resourceUsage.OrderByDescending(r => r.UsageCount).FirstOrDefault(),
-                LeastUsedResource = resourceUsage.OrderBy(r => r.UsageCount).FirstOrDefault()
-            };
+                Console.WriteLine($"Error loading revenue report: {ex.Message}");
+                Console.WriteLine($"StackTrace: {ex.StackTrace}");
+                return new RevenueReport();
+            }
         }
 
-        // 7. Экспорт отчета о выручке в PDF
-        public async Task<byte[]> ExportRevenueReportToPdfAsync(
-            DateTime startDate, DateTime endDate)
+        // 5. Экспорт отчета о выручке в PDF - ИСПРАВЛЕННЫЙ
+        public async Task<byte[]> ExportRevenueReportToPdfAsync(DateTime startDate, DateTime endDate)
         {
-            var report = await GetRevenueReportAsync(startDate, endDate);
-
-            using var memoryStream = new MemoryStream();
-            var document = new iTextSharp.text.Document(
-                iTextSharp.text.PageSize.A4, 50, 50, 50, 50);
-            var writer = iTextSharp.text.pdf.PdfWriter.GetInstance(document, memoryStream);
-
-            document.Open();
-
-            // Заголовок
-            var titleFont = iTextSharp.text.FontFactory.GetFont(
-                "Arial", 18, iTextSharp.text.Font.BOLD);
-            var title = new iTextSharp.text.Paragraph("Отчет о выручке", titleFont)
+            try
             {
-                Alignment = iTextSharp.text.Element.ALIGN_CENTER,
-                SpacingAfter = 20
-            };
-            document.Add(title);
+                Console.WriteLine("Начало экспорта в PDF...");
 
-            // Период
-            var periodFont = iTextSharp.text.FontFactory.GetFont("Arial", 12);
-            var period = new iTextSharp.text.Paragraph(
-                $"Период: {startDate:dd.MM.yyyy} - {endDate:dd.MM.yyyy}", periodFont)
-            {
-                SpacingAfter = 10
-            };
-            document.Add(period);
+                var report = await GetRevenueReportAsync(startDate, endDate);
 
-            // Основная статистика
-            var statsTable = new iTextSharp.text.pdf.PdfPTable(2)
-            {
-                WidthPercentage = 100,
-                SpacingBefore = 10,
-                SpacingAfter = 20
-            };
+                Console.WriteLine($"Получен отчет: Выручка = {report.TotalRevenue}, Услуг в топе = {report.TopServices?.Count ?? 0}");
 
-            AddStatRow(statsTable, "Всего заказов:", report.TotalOrders.ToString());
-            AddStatRow(statsTable, "Завершенных заказов:", report.CompletedOrders.ToString());
-            AddStatRow(statsTable, "Отмененных заказов:", report.CancelledOrders.ToString());
-            AddStatRow(statsTable, "Общая выручка:", $"{report.TotalRevenue:N2} руб.");
-            AddStatRow(statsTable, "Средний чек:", $"{report.AverageOrderValue:N2} руб.");
+                using var memoryStream = new MemoryStream();
+                var document = new Document(PageSize.A4.Rotate(), 50, 50, 50, 50);
+                var writer = PdfWriter.GetInstance(document, memoryStream);
 
-            document.Add(statsTable);
+                document.Open();
 
-            // Топ услуг
-            if (report.TopServices.Any())
-            {
-                var servicesTitle = new iTextSharp.text.Paragraph("Топ услуг по выручке", titleFont)
+                // Заголовок
+                var titleFont = FontFactory.GetFont("Arial", 18, Font.BOLD);
+                var title = new Paragraph("ОТЧЕТ О ВЫРУЧКЕ", titleFont)
                 {
-                    SpacingBefore = 20,
+                    Alignment = Element.ALIGN_CENTER,
+                    SpacingAfter = 20
+                };
+                document.Add(title);
+
+                // Период
+                var periodFont = FontFactory.GetFont("Arial", 12);
+                var period = new Paragraph($"Период: {startDate:dd.MM.yyyy} - {endDate:dd.MM.yyyy}", periodFont)
+                {
                     SpacingAfter = 10
                 };
-                document.Add(servicesTitle);
+                document.Add(period);
 
-                var servicesTable = new iTextSharp.text.pdf.PdfPTable(3)
+                // Основные показатели
+                document.Add(new Paragraph("Основные показатели:", FontFactory.GetFont("Arial", 14, Font.BOLD))
+                {
+                    SpacingAfter = 10
+                });
+
+                var statsTable = new PdfPTable(4)
                 {
                     WidthPercentage = 100,
+                    SpacingBefore = 10,
                     SpacingAfter = 20
                 };
 
-                servicesTable.AddCell("Услуга");
-                servicesTable.AddCell("Количество заказов");
-                servicesTable.AddCell("Выручка");
+                statsTable.SetWidths(new float[] { 1, 1, 1, 1 });
 
-                foreach (var service in report.TopServices)
+                // Добавляем строки с метриками
+                AddStatRow(statsTable, "Общая выручка:", $"{report.TotalRevenue:N0} ₽");
+                AddStatRow(statsTable, "Средний чек:", $"{report.AverageOrderValue:N0} ₽");
+                AddStatRow(statsTable, "Всего заказов:", report.TotalOrders.ToString());
+                AddStatRow(statsTable, "Завершено:", report.CompletedOrders.ToString());
+                AddStatRow(statsTable, "Отменено:", report.CancelledOrders.ToString());
+
+                document.Add(statsTable);
+
+                // График выручки по дням
+                if (report.RevenueByDay != null && report.RevenueByDay.Any())
                 {
-                    servicesTable.AddCell(service.ServiceName);
-                    servicesTable.AddCell(service.OrderCount.ToString());
-                    servicesTable.AddCell($"{service.Revenue:N2} руб.");
+                    document.Add(new Paragraph("Выручка по дням:", FontFactory.GetFont("Arial", 14, Font.BOLD))
+                    {
+                        SpacingBefore = 10,
+                        SpacingAfter = 10
+                    });
+
+                    var chartTable = new PdfPTable(2)
+                    {
+                        WidthPercentage = 100,
+                        SpacingAfter = 20
+                    };
+
+                    AddTableHeader(chartTable, "Дата");
+                    AddTableHeader(chartTable, "Выручка");
+
+                    foreach (var item in report.RevenueByDay.OrderBy(x => x.Key))
+                    {
+                        chartTable.AddCell(CreateCell(item.Key.ToString("dd.MM.yyyy"), false));
+                        chartTable.AddCell(CreateCell($"{item.Value:N0} ₽", false));
+                    }
+
+                    document.Add(chartTable);
                 }
 
-                document.Add(servicesTable);
-            }
-
-            // Топ клиентов
-            if (report.CustomerStatistics.Any())
-            {
-                var customersTitle = new iTextSharp.text.Paragraph("Топ клиентов", titleFont)
+                // Топ услуг по выручке - ВЫВОДИМ ТОЛЬКО ЕСЛИ ЕСТЬ ДАННЫЕ
+                if (report.TopServices != null && report.TopServices.Any())
                 {
-                    SpacingBefore = 20,
-                    SpacingAfter = 10
-                };
-                document.Add(customersTitle);
+                    Console.WriteLine($"Добавляем {report.TopServices.Count} услуг в PDF");
 
-                var customersTable = new iTextSharp.text.pdf.PdfPTable(3)
+                    document.Add(new Paragraph("Топ услуг по выручке:", FontFactory.GetFont("Arial", 14, Font.BOLD))
+                    {
+                        SpacingBefore = 10,
+                        SpacingAfter = 10
+                    });
+
+                    var servicesTable = new PdfPTable(3)
+                    {
+                        WidthPercentage = 100,
+                        SpacingAfter = 20
+                    };
+
+                    servicesTable.SetWidths(new float[] { 2, 1, 1 });
+
+                    AddTableHeader(servicesTable, "Услуга");
+                    AddTableHeader(servicesTable, "Кол-во заказов");
+                    AddTableHeader(servicesTable, "Выручка");
+
+                    foreach (var service in report.TopServices)
+                    {
+                        servicesTable.AddCell(CreateCell(service.ServiceName, false));
+                        servicesTable.AddCell(CreateCell(service.OrderCount.ToString(), false));
+                        servicesTable.AddCell(CreateCell($"{service.Revenue:N0} ₽", false));
+                    }
+
+                    document.Add(servicesTable);
+                }
+                else
                 {
-                    WidthPercentage = 100
-                };
-
-                customersTable.AddCell("Клиент");
-                customersTable.AddCell("Количество заказов");
-                customersTable.AddCell("Общая сумма");
-
-                foreach (var customer in report.CustomerStatistics)
-                {
-                    customersTable.AddCell(customer.UserName);
-                    customersTable.AddCell(customer.OrderCount.ToString());
-                    customersTable.AddCell($"{customer.TotalSpent:N2} руб.");
+                    Console.WriteLine("Нет данных для топ услуг");
+                    document.Add(new Paragraph("Нет данных о топ услугах", FontFactory.GetFont("Arial", 12, Font.ITALIC))
+                    {
+                        SpacingBefore = 10,
+                        SpacingAfter = 20
+                    });
                 }
 
-                document.Add(customersTable);
+                // Топ клиентов
+                if (report.CustomerStatistics != null && report.CustomerStatistics.Any())
+                {
+                    document.Add(new Paragraph("Топ клиентов:", FontFactory.GetFont("Arial", 14, Font.BOLD))
+                    {
+                        SpacingBefore = 10,
+                        SpacingAfter = 10
+                    });
+
+                    var customersTable = new PdfPTable(3)
+                    {
+                        WidthPercentage = 100,
+                        SpacingAfter = 20
+                    };
+
+                    customersTable.SetWidths(new float[] { 2, 1, 1 });
+
+                    AddTableHeader(customersTable, "Клиент");
+                    AddTableHeader(customersTable, "Кол-во заказов");
+                    AddTableHeader(customersTable, "Общая сумма");
+
+                    foreach (var customer in report.CustomerStatistics)
+                    {
+                        customersTable.AddCell(CreateCell(customer.UserName, false));
+                        customersTable.AddCell(CreateCell(customer.OrderCount.ToString(), false));
+                        customersTable.AddCell(CreateCell($"{customer.TotalSpent:N0} ₽", false));
+                    }
+
+                    document.Add(customersTable);
+                }
+
+                // Дата генерации
+                var dateFont = FontFactory.GetFont("Arial", 10, Font.ITALIC);
+                var generationDate = new Paragraph(
+                    $"Отчет сгенерирован: {DateTime.Now:dd.MM.yyyy HH:mm}", dateFont)
+                {
+                    Alignment = Element.ALIGN_RIGHT,
+                    SpacingBefore = 30
+                };
+                document.Add(generationDate);
+
+                document.Close();
+
+                Console.WriteLine("PDF успешно создан");
+                return memoryStream.ToArray();
             }
-
-            // Дата генерации
-            var dateFont = iTextSharp.text.FontFactory.GetFont(
-                "Arial", 10, iTextSharp.text.Font.ITALIC);
-            var generationDate = new iTextSharp.text.Paragraph(
-                $"Отчет сгенерирован: {DateTime.Now:dd.MM.yyyy HH:mm}", dateFont)
+            catch (Exception ex)
             {
-                Alignment = iTextSharp.text.Element.ALIGN_RIGHT,
-                SpacingBefore = 30
-            };
-            document.Add(generationDate);
-
-            document.Close();
-
-            return memoryStream.ToArray();
+                Console.WriteLine($"Error exporting PDF: {ex.Message}");
+                Console.WriteLine($"StackTrace: {ex.StackTrace}");
+                throw;
+            }
         }
 
-        // 8. Экспорт ежедневного отчета в PDF
-        public async Task<byte[]> ExportDailyReportToPdfAsync(DateTime date)
-        {
-            var report = await GetDailyReportAsync(date);
-
-            using var memoryStream = new MemoryStream();
-            var document = new iTextSharp.text.Document(iTextSharp.text.PageSize.A4);
-            var writer = iTextSharp.text.pdf.PdfWriter.GetInstance(document, memoryStream);
-
-            document.Open();
-
-            var titleFont = iTextSharp.text.FontFactory.GetFont(
-                "Arial", 16, iTextSharp.text.Font.BOLD);
-            var title = new iTextSharp.text.Paragraph(
-                $"Ежедневный отчет за {date:dd.MM.yyyy}", titleFont)
-            {
-                Alignment = iTextSharp.text.Element.ALIGN_CENTER,
-                SpacingAfter = 20
-            };
-            document.Add(title);
-
-            document.Close();
-            return memoryStream.ToArray();
-        }
-
+        // Вспомогательные методы
         private void AddStatRow(PdfPTable table, string label, string value)
         {
-            var labelCell = new PdfPCell(new Phrase(label))
+            table.AddCell(CreateCell(label, true));
+            table.AddCell(CreateCell(value, false));
+            table.AddCell(CreateCell("", false)); // Пустые ячейки для выравнивания
+            table.AddCell(CreateCell("", false));
+        }
+
+        private void AddTableHeader(PdfPTable table, string text)
+        {
+            table.AddCell(CreateCell(text, true));
+        }
+
+        private PdfPCell CreateCell(string text, bool isHeader)
+        {
+            var font = isHeader ?
+                FontFactory.GetFont("Arial", 10, Font.BOLD) :
+                FontFactory.GetFont("Arial", 10);
+
+            var cell = new PdfPCell(new Phrase(text, font))
             {
-                Border = 0,
-                Padding = 5
+                Padding = 8,
+                BorderWidth = 0.5f
             };
 
-            var valueCell = new PdfPCell(new Phrase(value))
+            if (isHeader)
             {
-                Border = 0,
-                Padding = 5,
-                HorizontalAlignment = Element.ALIGN_RIGHT
-            };
+                cell.BackgroundColor = new BaseColor(200, 200, 200);
+            }
 
-            table.AddCell(labelCell);
-            table.AddCell(valueCell);
+            return cell;
         }
 
         private string GetPriceCategory(decimal weekdayPrice, decimal weekendPrice)
@@ -408,86 +664,6 @@ namespace BLL
                 < 5000 => "Дорогая",
                 _ => "Премиум"
             };
-        }
-        public class PopularServiceReport
-        {
-            public int ServiceId { get; set; }
-            public string ServiceName { get; set; }
-            public int OrderCount { get; set; }
-            public decimal TotalRevenue { get; set; }
-            public double AveragePeople { get; set; }
-            public int PopularityRank { get; set; }
-        }
-
-        public class ExpensiveServiceReport
-        {
-            public int ServiceId { get; set; }
-            public string ServiceName { get; set; }
-            public int Duration { get; set; }
-            public decimal WeekdayPrice { get; set; }
-            public decimal WeekendPrice { get; set; }
-            public decimal AveragePrice { get; set; }
-            public string PriceCategory { get; set; }
-        }
-
-        public class RevenueReport
-        {
-            public DateTime PeriodStart { get; set; }
-            public DateTime PeriodEnd { get; set; }
-            public int TotalOrders { get; set; }
-            public int CompletedOrders { get; set; }
-            public int CancelledOrders { get; set; }
-            public decimal TotalRevenue { get; set; }
-            public decimal AverageOrderValue { get; set; }
-            public Dictionary<string, decimal> RevenueByService { get; set; } = new();
-            public Dictionary<DateTime, decimal> RevenueByDay { get; set; } = new();
-            public List<ServiceRevenue> TopServices { get; set; } = new();
-            public List<CustomerStats> CustomerStatistics { get; set; } = new();
-        }
-
-        public class DailyReport
-        {
-            public DateTime ReportDate { get; set; }
-            public int TotalOrders { get; set; }
-            public int CompletedOrders { get; set; }
-            public Dictionary<string, int> OrdersByStatus { get; set; } = new();
-            public Dictionary<int, int> OrdersByHour { get; set; } = new();
-            public Dictionary<string, int> ResourceUtilization { get; set; } = new();
-            public int BusiestHour { get; set; }
-        }
-
-        public class ResourceReport
-        {
-            public DateTime PeriodStart { get; set; }
-            public DateTime PeriodEnd { get; set; }
-            public List<ResourceUsage> ResourceUsages { get; set; } = new();
-            public ResourceUsage MostUsedResource { get; set; }
-            public ResourceUsage LeastUsedResource { get; set; }
-        }
-
-        public class ServiceRevenue
-        {
-            public string ServiceName { get; set; }
-            public decimal Revenue { get; set; }
-            public int OrderCount { get; set; }
-        }
-
-        public class CustomerStats
-        {
-            public int UserId { get; set; }
-            public string UserName { get; set; }
-            public int OrderCount { get; set; }
-            public decimal TotalSpent { get; set; }
-        }
-
-        public class ResourceUsage
-        {
-            public int ResourceId { get; set; }
-            public string ResourceName { get; set; }
-            public int Capacity { get; set; }
-            public int UsageCount { get; set; }
-            public decimal TotalHours { get; set; }
-            public decimal UtilizationRate { get; set; }
         }
     }
 }
