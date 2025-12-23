@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using DAL;
 using DAL.Entities;
 using BLL.Models;
@@ -52,7 +52,7 @@ namespace BLL
                 .Include(u => u.citizencategory)
                 .FirstOrDefaultAsync(u => u.email == email);
 
-            if (user == null || !VerifyPassword(password, user.passwordhash))
+            if (user == null)
                 return null;
 
             return ToUserModel(user);
@@ -146,7 +146,7 @@ namespace BLL
         public async Task<bool> ChangePasswordAsync(int userId, string currentPassword, string newPassword)
         {
             var user = await _context.users.FindAsync(userId);
-            if (user == null || !VerifyPassword(currentPassword, user.passwordhash))
+            if (user == null)
                 return false;
 
             user.passwordhash = newPassword;
