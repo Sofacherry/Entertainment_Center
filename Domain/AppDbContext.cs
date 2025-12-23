@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using DAL.Entities;
 
 namespace DAL
@@ -43,6 +43,13 @@ namespace DAL
                 .HasOne(sc => sc.category)
                 .WithMany(c => c.servicecategories)
                 .HasForeignKey(sc => sc.categoryid);
+
+            modelBuilder.Entity<Orders>()
+                .Property(o => o.status)
+                .HasConversion(
+                    v => v, 
+                    v => v.ToString()) 
+                .HasColumnType("status");
         }
     }
 }
