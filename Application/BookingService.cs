@@ -1,7 +1,9 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using DAL.Entities;
 using System.Transactions;
 using DAL;
+using BLL.Models;
+using ServiceEntity = DAL.Entities.Services;
 
 namespace BLL
 {
@@ -46,14 +48,12 @@ namespace BLL
             if (service == null)
                 return new List<Resources>();
 
-            var suitableResources = service.resources
-                .Where(r => r.capacity >= peopleCount)
-                .ToList();
+            var allServiceResources = service.resources.ToList();
 
             var availableResources = new List<Resources>();
             var endTime = dateTime.AddMinutes(durationMinutes);
 
-            foreach (var resource in suitableResources)
+            foreach (var resource in allServiceResources)
             {
                 var isBusy = await IsResourceBusyAsync(resource.resourceid, dateTime, endTime);
                 if (!isBusy)
@@ -68,6 +68,7 @@ namespace BLL
         {
             return await _context.orderresources
                 .Include(or => or.order)
+                    .ThenInclude(o => o.service)
                 .Where(or => or.resourceid == resourceId)
                 .Where(or => or.order.status != "отменен")
                 .AnyAsync(or =>
@@ -97,13 +98,30 @@ namespace BLL
                     .ToList();
 
                 if (selectedResources.Count != request.SelectedResourceIds.Count)
-                    throw new Exception("Некоторые ресурсы уже заняты");
+                {
+                    var missingIds = request.SelectedResourceIds
+                        .Where(id => !selectedResources.Any(r => r.resourceid == id))
+                        .ToList();
+                    throw new Exception($"Ресурсы с ID {string.Join(", ", missingIds)} недоступны или уже заняты");
+                }
 
                 var service = await _context.services.FindAsync(request.ServiceId);
                 if (service == null)
                     throw new Exception("Услуга не найдена");
 
-                var basePrice = CalculateBasePrice(service, request.BookingDateTime, request.DurationMinutes);
+                // Рассчитываем базовую цену услуги
+                var servicePrice = CalculateBasePrice(service, request.BookingDateTime, request.DurationMinutes);
+                
+                // Добавляем стоимость дополнительных услуг
+                decimal extrasPrice = 0;
+                if (request.IncludeInstructor)
+                    extrasPrice += 500;
+                if (request.IncludeEquipment)
+                    extrasPrice += 300; // Предполагаемая стоимость оборудования
+                if (request.IncludeFood)
+                    extrasPrice += 1000;
+                
+                var basePrice = servicePrice + extrasPrice;
                 var finalPrice = await ApplyUserDiscountAsync(request.UserId, basePrice);
 
                 var order = new Orders
@@ -137,13 +155,18 @@ namespace BLL
             catch (Exception ex)
             {
                 await transaction.RollbackAsync();
-                Console.WriteLine($"Ошибка создания брони: {ex.Message}");
-                return null;
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания брони: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"StackTrace: {ex.StackTrace}");
+                if (ex.InnerException != null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"InnerException: {ex.InnerException.Message}");
+                }
+                throw;
             }
         }
 
         // 5. Расчет базовой цены
-        private decimal CalculateBasePrice(Services service, DateTime bookingDateTime, int durationMinutes)
+        private decimal CalculateBasePrice(ServiceEntity service, DateTime bookingDateTime, int durationMinutes)
         {
             var isWeekend = bookingDateTime.DayOfWeek == DayOfWeek.Saturday ||
                            bookingDateTime.DayOfWeek == DayOfWeek.Sunday;
@@ -159,8 +182,9 @@ namespace BLL
         {
             try
             {
-                var discount = await _userService.GetUserDiscountAsync(userId);
-                return _userService.ApplyDiscount(price, discount);
+                var discountPercent = await _userService.GetUserDiscountAsync(userId);
+                var discountDecimal = discountPercent / 100m;
+                return _userService.ApplyDiscount(price, discountDecimal);
             }
             catch
             {
@@ -243,6 +267,18 @@ namespace BLL
             return true;
         }
 
+        // 11a. Обработать успешную оплату заказа
+        public async Task<bool> ProcessPaymentSuccessAsync(int orderId)
+        {
+            var order = await _context.orders.FindAsync(orderId);
+            if (order == null)
+                return false;
+
+            order.status = "оплачен";
+            await _context.SaveChangesAsync();
+            return true;
+        }
+
         // 12. Изменить время заказа
         public async Task<bool> RescheduleOrderAsync(int orderId, DateTime newDateTime)
         {
@@ -276,6 +312,7 @@ namespace BLL
         {
             return await _context.orderresources
                 .Include(or => or.order)
+                    .ThenInclude(o => o.service)
                 .Where(or => or.resourceid == resourceId && or.order.orderid != excludeOrderId)
                 .Where(or => or.order.status != "отменен")
                 .AnyAsync(or =>
@@ -303,6 +340,19 @@ namespace BLL
             };
         }
 
+        public async Task<List<ResourceModel>> FindAvailableResourceModelsAsync(int serviceId, DateTime dateTime,
+            int durationMinutes, int peopleCount)
+        {
+            var resources = await FindAvailableResourcesAsync(serviceId, dateTime, durationMinutes, peopleCount);
+
+            return resources.Select(r => new ResourceModel
+            {
+                Id = r.resourceid,
+                Name = r.name,
+                Capacity = r.capacity
+            }).ToList();
+        }
+
         public class BookingRequest
         {
             public int UserId { get; set; }
@@ -311,6 +361,9 @@ namespace BLL
             public int DurationMinutes { get; set; }
             public int PeopleCount { get; set; }
             public List<int> SelectedResourceIds { get; set; } = new();
+            public bool IncludeInstructor { get; set; }
+            public bool IncludeEquipment { get; set; }
+            public bool IncludeFood { get; set; }
         }
 
         public class BookingStatistics
