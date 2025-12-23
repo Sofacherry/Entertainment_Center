@@ -1,8 +1,11 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using DAL;
 using DAL.Entities;
 using BLL.Models;
 using System.Linq;
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace BLL
 {
@@ -15,7 +18,6 @@ namespace BLL
             _context = context;
         }
 
-
         // 1. Получение всех услуг
         public async Task<List<ServiceModel>> GetAllServicesAsync()
         {
@@ -26,17 +28,19 @@ namespace BLL
                 .OrderBy(s => s.name)
                 .ToListAsync();
 
-            return entities.Select(ToServiceModel).ToList();
+            return entities.Select(entity => ToServiceModel(entity)).ToList();
         }
 
         // 2. Получение услуги по ID с деталями
-        public async Task<Services?> GetServiceDetailsAsync(int serviceId)
+        public async Task<ServiceModel?> GetServiceDetailsAsync(int serviceId)
         {
-            return await _context.services
+            var entity = await _context.services
                 .Include(s => s.resources)
                 .Include(s => s.servicecategories)
                     .ThenInclude(sc => sc.category)
                 .FirstOrDefaultAsync(s => s.serviceid == serviceId);
+
+            return entity != null ? ToServiceModel(entity) : null;
         }
 
         // 3. Поиск услуг по названию
@@ -53,11 +57,11 @@ namespace BLL
                 .OrderBy(s => s.name)
                 .ToListAsync();
 
-            return entities.Select(ToServiceModel).ToList();
+            return entities.Select(entity => ToServiceModel(entity)).ToList();
         }
 
         // Вспомогательный метод для преобразования
-        private ServiceModel ToServiceModel(Services entity)
+        private ServiceModel ToServiceModel(DAL.Entities.Services entity)
         {
             if (entity == null) return null;
 
@@ -85,31 +89,46 @@ namespace BLL
         }
 
         // 4. Фильтрация по категории
-        public async Task<List<Services>> GetServicesByCategoryAsync(int categoryId)
+        public async Task<List<ServiceModel>> GetServicesByCategoryAsync(int categoryId)
         {
-            return await _context.services
+            var entities = await _context.services
                 .Include(s => s.resources)
                 .Include(s => s.servicecategories)
                     .ThenInclude(sc => sc.category)
                 .Where(s => s.servicecategories.Any(sc => sc.categoryid == categoryId))
                 .ToListAsync();
+
+            return entities.Select(entity => ToServiceModel(entity)).ToList();
         }
 
         // 5. Получение всех категорий услуг
-        public async Task<List<Categories>> GetAllCategoriesAsync()
+        public async Task<List<CategoryModel>> GetAllCategoriesAsync()
         {
-            return await _context.categories
+            var categories = await _context.categories
                 .OrderBy(c => c.categoryname)
                 .ToListAsync();
+
+            return categories.Select(c => new CategoryModel
+            {
+                Id = c.categoryid,
+                Name = c.categoryname
+            }).ToList();
         }
 
         // 6. Получение ресурсов (дорожек, столов) для услуги
-        public async Task<List<Resources>> GetServiceResourcesAsync(int serviceId)
+        public async Task<List<ResourceModel>> GetServiceResourcesAsync(int serviceId)
         {
-            return await _context.resources
+            var resources = await _context.resources
                 .Where(r => r.serviceid == serviceId)
                 .OrderBy(r => r.name)
                 .ToListAsync();
+
+            return resources.Select(r => new ResourceModel
+            {
+                Id = r.resourceid,
+                Name = r.name,
+                Capacity = r.capacity
+            }).ToList();
         }
 
         // 7. Получение популярных услуг (по количеству заказов)
@@ -131,13 +150,15 @@ namespace BLL
         }
 
         // 8. Получение дорогих услуг (по цене)
-        public async Task<List<Services>> GetExpensiveServicesAsync(decimal minPrice)
+        public async Task<List<ServiceModel>> GetExpensiveServicesAsync(decimal minPrice)
         {
-            return await _context.services
+            var entities = await _context.services
                 .Include(s => s.resources)
                 .Where(s => s.weekdayprice >= minPrice || s.weekendprice >= minPrice)
                 .OrderByDescending(s => Math.Max(s.weekdayprice, s.weekendprice))
                 .ToListAsync();
+
+            return entities.Select(entity => ToServiceModel(entity)).ToList();
         }
 
         // 9. Проверка доступности услуги на дату
@@ -157,7 +178,7 @@ namespace BLL
         }
 
         // 10. Получение услуг с фильтрами
-        public async Task<List<Services>> GetFilteredServicesAsync(
+        public async Task<List<ServiceModel>> GetFilteredServicesAsync(
             int? categoryId = null,
             string searchTerm = null,
             decimal? maxPrice = null,
@@ -181,13 +202,13 @@ namespace BLL
             if (minDuration.HasValue)
                 query = query.Where(s => s.duration >= minDuration.Value);
 
-            return await query.ToListAsync();
+            var entities = await query.ToListAsync();
+            return entities.Select(entity => ToServiceModel(entity)).ToList();
         }
-
 
         public class ServiceWithStats
         {
-            public Services Service { get; set; }
+            public DAL.Entities.Services Service { get; set; }
             public int OrderCount { get; set; }
             public decimal TotalRevenue { get; set; }
         }
