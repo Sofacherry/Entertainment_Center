@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using DAL;
@@ -17,22 +17,17 @@ namespace Center
 
         protected override void OnStartup(StartupEventArgs e)
         {
-
-            
             var builder = new ConfigurationBuilder()
                 .SetBasePath(AppDomain.CurrentDomain.BaseDirectory)
                 .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
             Configuration = builder.Build();
+
             base.OnStartup(e);
 
             var services = new ServiceCollection();
             ConfigureServices(services);
             ServiceProvider = services.BuildServiceProvider();
 
-            //var viewModel = ServiceProvider.GetRequiredService<CatalogPageViewModel>();
-            //var catalogPage = new CatalogPageView();
-            //catalogPage.DataContext = viewModel;
-            //catalogPage.Show();
             var mainWindow = ServiceProvider.GetRequiredService<MainWindow>();
             var mainViewModel = ServiceProvider.GetRequiredService<MainViewModel>();
             mainWindow.DataContext = mainViewModel;
@@ -44,19 +39,19 @@ namespace Center
             var connectionString = Configuration.GetConnectionString("DefaultConnection");
 
             services.AddDbContext<AppDbContext>(options =>
-                options.UseNpgsql(connectionString));
+                options.UseNpgsql(connectionString), ServiceLifetime.Transient);
 
-            services.AddScoped<CatalogService>();
-            services.AddScoped<BookingService>();
-            services.AddScoped<UserService>();
-            services.AddScoped<ReportService>();
-            services.AddScoped<AdminCRUDService>();
+            services.AddTransient<CatalogService>();
+            services.AddTransient<BookingService>();
+            services.AddTransient<UserService>();
+            services.AddTransient<ReportService>();
+            services.AddTransient<AdminCRUDService>();
 
             services.AddTransient<CatalogPageViewModel>();
             services.AddTransient<MainViewModel>();
+            services.AddTransient<BookingViewModel>();
 
             services.AddTransient<MainWindow>();
-            services.AddTransient<CatalogPageView>();
         }
     }
 }
